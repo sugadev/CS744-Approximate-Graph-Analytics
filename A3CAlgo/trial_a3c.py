@@ -39,9 +39,9 @@ class ActorCriticModel(keras.Model):
     super(ActorCriticModel, self).__init__()
     self.state_size = state_size
     self.action_size = action_size
-    self.dense1 = layers.Dense(100, activation='relu')
-    self.policy_logits = layers.Dense(action_size)
-    self.dense2 = layers.Dense(100, activation='relu')
+    self.dense1 = layers.Dense(50, activation='relu')
+    self.policy_logits = layers.Dense(1)
+    self.dense2 = layers.Dense(50, activation='relu')
     self.values = layers.Dense(1)
 
   def call(self, inputs):
@@ -92,8 +92,8 @@ class RandomAgent:
       env_name: Name of the environment to be played
       max_eps: Maximum number of episodes to run agent for.
   """
-  def __init__(self, env_name, max_eps):
-    self.env = gym.make(env_name)
+  def __init__(self, max_eps):
+    # self.env = gym.make(env_name)
     self.max_episodes = max_eps
     self.global_moving_average_reward = 0
     self.res_queue = Queue()
@@ -102,12 +102,12 @@ class RandomAgent:
     reward_avg = 0
     for episode in range(self.max_episodes):
       done = False
-      self.env.reset()
+      # self.env.reset()
       reward_sum = 0.0
       steps = 0
       while not done:
         # Sample randomly from the action space and step
-        _, reward, done, _ = self.env.step(self.env.action_space.sample())
+        # _, reward, done, _ = self.env.step(self.env.action_space.sample())
         steps += 1
         reward_sum += reward
       # Record statistics
@@ -125,15 +125,17 @@ class RandomAgent:
 
 class MasterAgent():
   def __init__(self):
-    self.game_name = 'CartPole-v0'
+    # self.game_name = 'CartPole-v0'
     save_dir = args.save_dir
     self.save_dir = save_dir
     if not os.path.exists(save_dir):
       os.makedirs(save_dir)
 
-    env = gym.make(self.game_name)
-    self.state_size = env.observation_space.shape[0]
-    self.action_size = env.action_space.n
+    # env = gym.make(self.game_name)
+    # self.state_size = env.observation_space.shape[0]
+    self.state_size = pow(2, E) - 2
+    # self.action_size = env.action_space.n
+    self.action_size = 2
     self.opt = tf.train.AdamOptimizer(args.lr, use_locking=True)
     print(self.state_size, self.action_size)
 
@@ -142,7 +144,7 @@ class MasterAgent():
 
   def train(self):
     if args.algorithm == 'random':
-      random_agent = RandomAgent(self.game_name, args.max_eps)
+      # random_agent = RandomAgent(self.game_name, args.max_eps)
       random_agent.run()
       return
 
@@ -152,7 +154,8 @@ class MasterAgent():
                       self.action_size,
                       self.global_model,
                       self.opt, res_queue,
-                      i, game_name=self.game_name,
+                      i, 
+		      # game_name=self.game_name,
                       save_dir=self.save_dir) for i in range(multiprocessing.cpu_count())]
 
     for i, worker in enumerate(workers):
@@ -172,14 +175,14 @@ class MasterAgent():
     plt.ylabel('Moving average ep reward')
     plt.xlabel('Step')
     plt.savefig(os.path.join(self.save_dir,
-                             '{} Moving Average.png'.format(self.game_name)))
+                             'Moving Average.png'))
     # plt.show()
 
   def play(self):
-    env = gym.make(self.game_name).unwrapped
-    state = env.reset()
+    # env = gym.make(self.game_name).unwrapped
+    # state = env.reset()
     model = self.global_model
-    model_path = os.path.join(self.save_dir, 'model_{}.h5'.format(self.game_name))
+    model_path = os.path.join(self.save_dir, 'model.h5')
     print('Loading model from: {}'.format(model_path))
     model.load_weights(model_path)
     done = False
@@ -188,18 +191,18 @@ class MasterAgent():
 
     try:
       while not done:
-        env.render(mode='rgb_array')
+        # env.render(mode='rgb_array')
         policy, value = model(tf.convert_to_tensor(state[None, :], dtype=tf.float32))
         policy = tf.nn.softmax(policy)
         action = np.argmax(policy)
-        state, reward, done, _ = env.step(action)
+        # state, reward, done, _ = env.step(action)
         reward_sum += reward
         print("{}. Reward: {}, action: {}".format(step_counter, reward_sum, action))
         step_counter += 1
     except KeyboardInterrupt:
       print("Received Keyboard Interrupt. Shutting down.")
     finally:
-      env.close()
+      # env.close()
 
 
 class Memory:
@@ -234,7 +237,7 @@ class Worker(threading.Thread):
                opt,
                result_queue,
                idx,
-               game_name='CartPole-v0',
+               # game_name='CartPole-v0',
                save_dir='/tmp'):
     super(Worker, self).__init__()
     self.state_size = state_size
@@ -244,8 +247,8 @@ class Worker(threading.Thread):
     self.opt = opt
     self.local_model = ActorCriticModel(self.state_size, self.action_size)
     self.worker_idx = idx
-    self.game_name = game_name
-    self.env = gym.make(self.game_name).unwrapped
+    # self.game_name = game_name
+    # self.env = gym.make(self.game_name).unwrapped
     self.save_dir = save_dir
     self.ep_loss = 0.0
 
@@ -253,7 +256,7 @@ class Worker(threading.Thread):
     total_step = 1
     mem = Memory()
     while Worker.global_episode < args.max_eps:
-      current_state = self.env.reset()
+      # current_state = self.env.reset()
       mem.clear()
       ep_reward = 0.
       ep_steps = 0
@@ -268,7 +271,7 @@ class Worker(threading.Thread):
         probs = tf.nn.softmax(logits)
 
         action = np.random.choice(self.action_size, p=probs.numpy()[0])
-        new_state, reward, done, _ = self.env.step(action)
+        # new_state, reward, done, _ = self.env.step(action)
         if done:
           reward = -1
         ep_reward += reward
