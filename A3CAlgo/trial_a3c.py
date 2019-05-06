@@ -34,6 +34,10 @@ parser.add_argument('--save-dir', default='/tmp/', type=str,
                     help='Directory in which you desire to save the model.')
 args = parser.parse_args()
 
+G=nx.read_edgelist('/home/krishraj95/Big_Data_Project/CS744-Approximate-Graph-Analytics/Featurization/final_features/graph_119.embeddings', nodetype=int, data=(('f1',float),('f2',float),('f3',float),('f4',float),('f5',float),('f6',float),('f7',float),('f8',float),('f9',float),('f10',float)))
+
+org_triangle = getTrianglesCount(G)
+
 class ActorCriticModel(keras.Model):
   def __init__(self, state_size, action_size):
     super(ActorCriticModel, self).__init__()
@@ -102,13 +106,17 @@ class RandomAgent:
     reward_avg = 0
     for episode in range(self.max_episodes):
       done = False
+      curr_state = G
       # self.env.reset()
       reward_sum = 0.0
       steps = 0
       while not done:
         # Sample randomly from the action space and step
         # _, reward, done, _ = self.env.step(self.env.action_space.sample())
-        steps += 1
+        reward = get_reward(curr_state) 
+	new_state = take_action(curr_state,edge_value) 
+
+	steps += 1
         reward_sum += reward
       # Record statistics
       self.global_moving_average_reward = record(episode,
@@ -367,3 +375,21 @@ if __name__ == '__main__':
     master.train()
   else:
     master.play()
+
+def getTrianglesCount(G):
+    triangles = nx.triangles(G).values()
+    res = 0
+    
+    for t in triangles:
+        res+=t
+    
+    return int(res/3);
+
+def get_reward(newG):
+    t2 = getTrianglesCount(newG)
+    
+    # if diff is more discourage it
+    diff = orgValue - t2 + 0.0001
+    
+    reward = orgValue/diff
+    return reward
