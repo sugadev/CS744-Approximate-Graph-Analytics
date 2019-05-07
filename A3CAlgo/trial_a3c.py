@@ -1,6 +1,7 @@
 import os
+import networkx as nx
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
-
+import copy
 import threading
 import gym
 import multiprocessing
@@ -34,7 +35,8 @@ parser.add_argument('--save-dir', default='/tmp/', type=str,
                     help='Directory in which you desire to save the model.')
 args = parser.parse_args()
 
-G=nx.read_edgelist('/home/krishraj95/Big_Data_Project/CS744-Approximate-Graph-Analytics/Featurization/final_features/graph_119.embeddings', nodetype=int, data=(('f1',float),('f2',float),('f3',float),('f4',float),('f5',float),('f6',float),('f7',float),('f8',float),('f9',float),('f10',float)))
+Graph=nx.read_edgelist('/home/krishraj95/Big_Data_Project/CS744-Approximate-Graph-Analytics/Featurization/final_features/graph_119.embeddings', nodetype=int, data=(('f1',float),('f2',float),('f3',float),('f4',float),('f5',float),('f6',float),('f7',float),('f8',float),('f9',float),('f10',float)))
+G = copy.deepcopy(Graph)
 
 org_triangle = getTrianglesCount(G)
 
@@ -106,18 +108,25 @@ class RandomAgent:
     reward_avg = 0
     for episode in range(self.max_episodes):
       done = False
-      curr_state = G
+      curr_graph = G 
       # self.env.reset()
       reward_sum = 0.0
       steps = 0
-      while not done:
+      while not reward < 0.001:
         # Sample randomly from the action space and step
         # _, reward, done, _ = self.env.step(self.env.action_space.sample())
-        reward = get_reward(curr_state) 
-	new_state = take_action(curr_state,edge_value) 
-
+        val1 = get_reward(curr_graph) 
+        edges = curr_graph.edges(data = True)
+	edge = edges[random.randint(0,len(edges))]
+		
+	new_graph, action_taken = take_action(curr_graph, edge, random.randint(0,2)) 
+	val2 = get_reward(new_graph) 
+	reward = val2 - val1
+	
 	steps += 1
         reward_sum += reward
+	curr_graph = new_graph
+		
       # Record statistics
       self.global_moving_average_reward = record(episode,
                                                  reward_sum,
@@ -125,7 +134,7 @@ class RandomAgent:
                                                  self.global_moving_average_reward,
                                                  self.res_queue, 0, steps)
 
-      reward_avg += reward_sum
+    reward_avg += reward_sum
     final_avg = reward_avg / float(self.max_episodes)
     print("Average score across {} episodes: {}".format(self.max_episodes, final_avg))
     return final_avg
@@ -148,7 +157,8 @@ class MasterAgent():
     print(self.state_size, self.action_size)
 
     self.global_model = ActorCriticModel(self.state_size, self.action_size)  # global network
-    self.global_model(tf.convert_to_tensor(np.random.random((1, self.state_size)), dtype=tf.float32))
+    edges = G.edges(data=True)
+    self.global_model(tf.convert_to_tensor(convert_to_state(G, random.randint(0, len(edges))), dtype=tf.float32))
 
   def train(self):
     if args.algorithm == 'random':
@@ -163,7 +173,7 @@ class MasterAgent():
                       self.global_model,
                       self.opt, res_queue,
                       i, 
-		      # game_name=self.game_name,
+                      # game_name=self.game_name,
                       save_dir=self.save_dir) for i in range(multiprocessing.cpu_count())]
 
     for i, worker in enumerate(workers):
@@ -189,6 +199,7 @@ class MasterAgent():
   def play(self):
     # env = gym.make(self.game_name).unwrapped
     # state = env.reset()
+    curr_graph = G
     model = self.global_model
     model_path = os.path.join(self.save_dir, 'model.h5')
     print('Loading model from: {}'.format(model_path))
@@ -198,19 +209,28 @@ class MasterAgent():
     reward_sum = 0
 
     try:
-      while not done:
+      while not reward < 0.001:
         # env.render(mode='rgb_array')
-        policy, value = model(tf.convert_to_tensor(state[None, :], dtype=tf.float32))
+        policy, value = model(tf.convert_to_tensor(convert_to_state(curr_graph, random.randint(0, len(curr_graph.edges(data = True)))), dtype=tf.float32))
         policy = tf.nn.softmax(policy)
         action = np.argmax(policy)
         # state, reward, done, _ = env.step(action)
+		
+	val1 = get_reward(curr_graph) 
+	edges = curr_graph.edges(data = True)
+	edge = edges[random.randint(0,len(edges))]
+	
+	new_graph, action = take_action(curr_graph, edge, action) 
+	val2 = get_reward(new_graph) 
+	reward = val2 - val1
+		
         reward_sum += reward
+	curr_graph = new_graph
+		
         print("{}. Reward: {}, action: {}".format(step_counter, reward_sum, action))
         step_counter += 1
     except KeyboardInterrupt:
       print("Received Keyboard Interrupt. Shutting down.")
-    finally:
-      # env.close()
 
 
 class Memory:
@@ -265,6 +285,7 @@ class Worker(threading.Thread):
     mem = Memory()
     while Worker.global_episode < args.max_eps:
       # current_state = self.env.reset()
+      curr_graph = G 
       mem.clear()
       ep_reward = 0.
       ep_steps = 0
@@ -272,19 +293,29 @@ class Worker(threading.Thread):
 
       time_count = 0
       done = False
-      while not done:
-        logits, _ = self.local_model(
-            tf.convert_to_tensor(current_state[None, :],
-                                 dtype=tf.float32))
+      while not reward < 0.001:
+        logits, _ = self.local_model(tf.convert_to_tensor((convert_to_state(curr_graph, random.randint(0, len(curr_graph.edges()))), dtype=tf.float32)))
         probs = tf.nn.softmax(logits)
 
         action = np.random.choice(self.action_size, p=probs.numpy()[0])
         # new_state, reward, done, _ = self.env.step(action)
-        if done:
+		
+	val1 = get_reward(curr_graph) 
+	edges = curr_graph.edges(data = True)
+	edge = edges[random.randint(0,len(edges))]
+		
+	new_graph, action = take_action(curr_graph, edge, action) 
+	val2 = get_reward(new_graph) 
+	reward = val2 - val1
+		
+        if reward < 0.001:
           reward = -1
         ep_reward += reward
-        mem.store(current_state, action, reward)
+		
+	curr_state = convert_to_state(curr_graph, edge)
+        mem.store(curr_state, action, reward)
 
+	new_state = convert_to_state(new_graph, edge)
         if time_count == args.update_freq or done:
           # Calculate gradient wrt to local model. We do so by tracking the
           # variables involved in computing the loss by using tf.GradientTape
@@ -324,9 +355,10 @@ class Worker(threading.Thread):
         ep_steps += 1
 
         time_count += 1
-        current_state = new_state
+        # current_state = new_state
+		curr_graph = new_graph
         total_step += 1
-    self.result_queue.put(None)
+  self.result_queue.put(None)
 
   def compute_loss(self,
                    done,
@@ -336,9 +368,7 @@ class Worker(threading.Thread):
     if done:
       reward_sum = 0.  # terminal
     else:
-      reward_sum = self.local_model(
-          tf.convert_to_tensor(new_state[None, :],
-                               dtype=tf.float32))[-1].numpy()[0]
+      reward_sum = self.local_model(tf.convert_to_tensor(new_state[None, :], dtype=tf.float32))[-1].numpy()[0]
 
     # Get discounted rewards
     discounted_rewards = []
@@ -347,12 +377,10 @@ class Worker(threading.Thread):
       discounted_rewards.append(reward_sum)
     discounted_rewards.reverse()
 
-    logits, values = self.local_model(
-        tf.convert_to_tensor(np.vstack(memory.states),
-                             dtype=tf.float32))
+    logits, values = self.local_model(tf.convert_to_tensor(np.vstack(memory.states), dtype=tf.float32))
+
     # Get our advantages
-    advantage = tf.convert_to_tensor(np.array(discounted_rewards)[:, None],
-                            dtype=tf.float32) - values
+    advantage = tf.convert_to_tensor(np.array(discounted_rewards)[:, None],dtype=tf.float32) - values
     # Value loss
     value_loss = advantage ** 2
 
@@ -360,8 +388,7 @@ class Worker(threading.Thread):
     policy = tf.nn.softmax(logits)
     entropy = tf.nn.softmax_cross_entropy_with_logits_v2(labels=policy, logits=logits)
 
-    policy_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=memory.actions,
-                                                                 logits=logits)
+    policy_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=memory.actions,logits=logits)
     policy_loss *= tf.stop_gradient(advantage)
     policy_loss -= 0.01 * entropy
     total_loss = tf.reduce_mean((0.5 * value_loss + policy_loss))
@@ -377,19 +404,35 @@ if __name__ == '__main__':
     master.play()
 
 def getTrianglesCount(G):
-    triangles = nx.triangles(G).values()
-    res = 0
-    
-    for t in triangles:
-        res+=t
-    
-    return int(res/3);
+  triangles = nx.triangles(G).values()
+  res = 0
+
+  for t in triangles:
+	  res+=t
+
+  return int(res/3);
 
 def get_reward(newG):
-    t2 = getTrianglesCount(newG)
-    
-    # if diff is more discourage it
-    diff = orgValue - t2 + 0.0001
-    
-    reward = orgValue/diff
-    return reward
+  t2 = getTrianglesCount(newG)
+
+  # if diff is more discourage it
+  diff = orgValue - t2 + 0.0001
+
+  reward = orgValue/diff
+  return reward
+
+def take_action(graph, edge, action):
+  if action == 0:
+    return graph.remove_edge(edge[0], edge[1]), 0
+	
+  else
+    return graph, 1
+	
+def convert_to_state(graph, edgevec):
+  graph_vec = []
+  graph_vec.append(nx.number_of_nodes(graph))
+  graph_vec.append(nx.density(graph))
+  graph_vec.append(nx.number_of_edges(graph))
+  
+  for i in range(2, len(edgevec)):
+    graph_vec.append(edgevec[i])
