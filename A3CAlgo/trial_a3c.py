@@ -117,16 +117,16 @@ class RandomAgent:
         # _, reward, done, _ = self.env.step(self.env.action_space.sample())
         val1 = get_reward(curr_graph) 
         edges = curr_graph.edges(data = True)
-	edge = edges[random.randint(0,len(edges))]
-		
-	new_graph, action_taken = take_action(curr_graph, edge, random.randint(0,2)) 
-	val2 = get_reward(new_graph) 
-	reward = val2 - val1
-	
-	steps += 1
+        edge = edges[random.randint(0,len(edges))]
+  
+        new_graph, action_taken = take_action(curr_graph, edge, random.randint(0,2)) 
+        val2 = get_reward(new_graph) 
+        reward = val2 - val1
+ 
+        steps += 1
         reward_sum += reward
-	curr_graph = new_graph
-		
+        curr_graph = new_graph
+  
       # Record statistics
       self.global_moving_average_reward = record(episode,
                                                  reward_sum,
@@ -215,18 +215,18 @@ class MasterAgent():
         policy = tf.nn.softmax(policy)
         action = np.argmax(policy)
         # state, reward, done, _ = env.step(action)
-		
-	val1 = get_reward(curr_graph) 
-	edges = curr_graph.edges(data = True)
-	edge = edges[random.randint(0,len(edges))]
-	
-	new_graph, action = take_action(curr_graph, edge, action) 
-	val2 = get_reward(new_graph) 
-	reward = val2 - val1
-		
+  
+        val1 = get_reward(curr_graph) 
+        edges = curr_graph.edges(data = True)
+        edge = edges[random.randint(0,len(edges))]
+ 
+        new_graph, action = take_action(curr_graph, edge, action) 
+        val2 = get_reward(new_graph) 
+        reward = val2 - val1
+  
         reward_sum += reward
-	curr_graph = new_graph
-		
+        curr_graph = new_graph
+  
         print("{}. Reward: {}, action: {}".format(step_counter, reward_sum, action))
         step_counter += 1
     except KeyboardInterrupt:
@@ -294,28 +294,28 @@ class Worker(threading.Thread):
       time_count = 0
       done = False
       while not reward < 0.001:
-        logits, _ = self.local_model(tf.convert_to_tensor((convert_to_state(curr_graph, random.randint(0, len(curr_graph.edges()))), dtype=tf.float32)))
+        logits, _ = self.local_model(tf.convert_to_tensor(convert_to_state(curr_graph, random.randint(0, len(curr_graph.edges()))), dtype=tf.float32))
         probs = tf.nn.softmax(logits)
 
         action = np.random.choice(self.action_size, p=probs.numpy()[0])
         # new_state, reward, done, _ = self.env.step(action)
-		
-	val1 = get_reward(curr_graph) 
-	edges = curr_graph.edges(data = True)
-	edge = edges[random.randint(0,len(edges))]
-		
-	new_graph, action = take_action(curr_graph, edge, action) 
-	val2 = get_reward(new_graph) 
-	reward = val2 - val1
-		
+  
+        val1 = get_reward(curr_graph) 
+        edges = curr_graph.edges(data = True)
+        edge = edges[random.randint(0,len(edges))]
+  
+        new_graph, action = take_action(curr_graph, edge, action) 
+        val2 = get_reward(new_graph) 
+        reward = val2 - val1
+  
         if reward < 0.001:
           reward = -1
         ep_reward += reward
-		
-	curr_state = convert_to_state(curr_graph, edge)
+  
+        curr_state = convert_to_state(curr_graph, edge)
         mem.store(curr_state, action, reward)
 
-	new_state = convert_to_state(new_graph, edge)
+        new_state = convert_to_state(new_graph, edge)
         if time_count == args.update_freq or done:
           # Calculate gradient wrt to local model. We do so by tracking the
           # variables involved in computing the loss by using tf.GradientTape
@@ -356,7 +356,7 @@ class Worker(threading.Thread):
 
         time_count += 1
         # current_state = new_state
-		curr_graph = new_graph
+        curr_graph = new_graph
         total_step += 1
   self.result_queue.put(None)
 
@@ -408,7 +408,7 @@ def getTrianglesCount(G):
   res = 0
 
   for t in triangles:
-	  res+=t
+   res+=t
 
   return int(res/3);
 
@@ -424,10 +424,10 @@ def get_reward(newG):
 def take_action(graph, edge, action):
   if action == 0:
     return graph.remove_edge(edge[0], edge[1]), 0
-	
-  else
+ 
+  else:
     return graph, 1
-	
+ 
 def convert_to_state(graph, edgevec):
   graph_vec = []
   graph_vec.append(nx.number_of_nodes(graph))
