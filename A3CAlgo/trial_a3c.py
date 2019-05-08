@@ -39,6 +39,7 @@ Graph=nx.read_edgelist('/home/krishraj95/Big_Data_Project/CS744-Approximate-Grap
 G = copy.deepcopy(Graph)
 E = len(G.edges(data=True))
 sr = 0.4
+
 def getTrianglesCount(G):
   triangles = nx.triangles(G).values()
   res = 0
@@ -47,6 +48,7 @@ def getTrianglesCount(G):
     res+=t
 
   return int(res/3);
+orgValue = getTrianglesCount(G)
 
 def get_reward(newG):
   t2 = getTrianglesCount(newG)
@@ -198,7 +200,7 @@ class MasterAgent():
 
     self.global_model = ActorCriticModel(self.state_size, self.action_size)  # global network
     edges = G.edges(data=True)
-    # print(np.reshape(np.asarray(convert_to_state(G, list(edges)[random.randint(0, len(edges))])), (-1, 13)))
+    print(list(edges)[random.randint(0, len(edges))])
 
     self.global_model(tf.convert_to_tensor(np.reshape(np.asarray(convert_to_state(G, list(edges)[random.randint(0, len(edges))])), (-1, 13)), dtype=tf.float32))
 
@@ -255,7 +257,7 @@ class MasterAgent():
       while not sampling_ratio < sr:
         # env.render(mode='rgb_array')
         curr_edges = curr_graph.edges(data = True)
-        policy, value = model(tf.convert_to_tensor(np.reshape(np.asarray(convert_to_state(curr_graph, list(curr_edges)[random.randint(0, len(edges))])), (-1, 13)), dtype=tf.float32))
+        policy, value = model(tf.convert_to_tensor(np.reshape(np.asarray(convert_to_state(curr_graph, list(curr_edges)[random.randint(0, len(curr_edges))])), (-1, 13)), dtype=tf.float32))
         policy = tf.nn.softmax(policy)
         action = np.argmax(policy)
         # state, reward, done, _ = env.step(action)
@@ -341,8 +343,8 @@ class Worker(threading.Thread):
       done = False
       sampling_ratio = 1
       while not sampling_ratio < sr:
-        curr_edges = curr_graph.edges()
-        logits, _ = self.local_model(tf.convert_to_tensor(np.reshape(np.asarray(convert_to_state(curr_graph, list(curr_edges)[random.randint(0, len(edges))])), (-1, 13)), dtype=tf.float32))
+        curr_edges = curr_graph.edges(data=True)
+        logits, _ = self.local_model(tf.convert_to_tensor(np.reshape(np.asarray(convert_to_state(curr_graph, list(curr_edges)[random.randint(0, len(curr_edges))])), (-1, 13)), dtype=tf.float32))
         probs = tf.nn.softmax(logits)
 
         action = np.random.choice(self.action_size, p=probs.numpy()[0])
