@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 import tensorflow as tf
 from tensorflow.python import keras
 from tensorflow.python.keras import layers
-
+import random
 tf.enable_eager_execution()
 
 parser = argparse.ArgumentParser(description='Run A3C algorithm on the game '
@@ -37,6 +37,43 @@ args = parser.parse_args()
 
 Graph=nx.read_edgelist('/home/krishraj95/Big_Data_Project/CS744-Approximate-Graph-Analytics/Featurization/final_features/graph_119.embeddings', nodetype=int, data=(('f1',float),('f2',float),('f3',float),('f4',float),('f5',float),('f6',float),('f7',float),('f8',float),('f9',float),('f10',float)))
 G = copy.deepcopy(Graph)
+E = len(G.edges(data=True))
+sr = 0.4
+def getTrianglesCount(G):
+  triangles = nx.triangles(G).values()
+  res = 0
+
+  for t in triangles:
+    res+=t
+
+  return int(res/3);
+
+def get_reward(newG):
+  t2 = getTrianglesCount(newG)
+
+  # if diff is more discourage it
+  diff = orgValue - t2 + 0.0001
+
+  reward = orgValue/diff
+  return reward
+
+def take_action(graph, edge, action):
+  if action == 0:
+    return graph.remove_edge(edge[0], edge[1]), 0
+
+  else:
+    return graph, 1
+
+def convert_to_state(graph, edgevec):
+  graph_vec = []
+  graph_vec.append(nx.number_of_nodes(graph))
+  graph_vec.append(nx.density(graph))
+  graph_vec.append(nx.number_of_edges(graph))
+
+  for i in edgevec[2]:
+    graph_vec.append(edgevec[2][i])
+
+  return graph_vec
 
 org_triangle = getTrianglesCount(G)
 
@@ -112,12 +149,13 @@ class RandomAgent:
       # self.env.reset()
       reward_sum = 0.0
       steps = 0
-      while not reward < 0.001:
+      sampling_ratio = 1
+      while not sampling_ratio < sr:
         # Sample randomly from the action space and step
         # _, reward, done, _ = self.env.step(self.env.action_space.sample())
         val1 = get_reward(curr_graph) 
         edges = curr_graph.edges(data = True)
-        edge = edges[random.randint(0,len(edges))]
+        edge = list(edges)[random.randint(0,len(edges))]
   
         new_graph, action_taken = take_action(curr_graph, edge, random.randint(0,2)) 
         val2 = get_reward(new_graph) 
@@ -126,6 +164,8 @@ class RandomAgent:
         steps += 1
         reward_sum += reward
         curr_graph = new_graph
+        new_edges = new_graph.edges(data = True)
+        sampling_ratio = len(new_edges) * 1.0 / len(edges)
   
       # Record statistics
       self.global_moving_average_reward = record(episode,
@@ -152,13 +192,15 @@ class MasterAgent():
     # self.state_size = env.observation_space.shape[0]
     self.state_size = pow(2, E) - 2
     # self.action_size = env.action_space.n
-    self.action_size = 2
+    self.action_size = 1
     self.opt = tf.train.AdamOptimizer(args.lr, use_locking=True)
     print(self.state_size, self.action_size)
 
     self.global_model = ActorCriticModel(self.state_size, self.action_size)  # global network
     edges = G.edges(data=True)
-    self.global_model(tf.convert_to_tensor(convert_to_state(G, random.randint(0, len(edges))), dtype=tf.float32))
+    # print(np.reshape(np.asarray(convert_to_state(G, list(edges)[random.randint(0, len(edges))])), (-1, 13)))
+
+    self.global_model(tf.convert_to_tensor(np.reshape(np.asarray(convert_to_state(G, list(edges)[random.randint(0, len(edges))])), (-1, 13)), dtype=tf.float32))
 
   def train(self):
     if args.algorithm == 'random':
@@ -209,16 +251,18 @@ class MasterAgent():
     reward_sum = 0
 
     try:
-      while not reward < 0.001:
+      sampling_ratio = 1
+      while not sampling_ratio < sr:
         # env.render(mode='rgb_array')
-        policy, value = model(tf.convert_to_tensor(convert_to_state(curr_graph, random.randint(0, len(curr_graph.edges(data = True)))), dtype=tf.float32))
+        curr_edges = curr_graph.edges(data = True)
+        policy, value = model(tf.convert_to_tensor(np.reshape(np.asarray(convert_to_state(curr_graph, list(curr_edges)[random.randint(0, len(edges))])), (-1, 13)), dtype=tf.float32))
         policy = tf.nn.softmax(policy)
         action = np.argmax(policy)
         # state, reward, done, _ = env.step(action)
   
         val1 = get_reward(curr_graph) 
         edges = curr_graph.edges(data = True)
-        edge = edges[random.randint(0,len(edges))]
+        edge = list(edges)[random.randint(0,len(edges))]
  
         new_graph, action = take_action(curr_graph, edge, action) 
         val2 = get_reward(new_graph) 
@@ -226,6 +270,8 @@ class MasterAgent():
   
         reward_sum += reward
         curr_graph = new_graph
+        new_edges = new_graph.edges(data = True)
+        sampling_ratio = len(new_edges) * 1.0 / len(edges)
   
         print("{}. Reward: {}, action: {}".format(step_counter, reward_sum, action))
         step_counter += 1
@@ -293,8 +339,10 @@ class Worker(threading.Thread):
 
       time_count = 0
       done = False
-      while not reward < 0.001:
-        logits, _ = self.local_model(tf.convert_to_tensor(convert_to_state(curr_graph, random.randint(0, len(curr_graph.edges()))), dtype=tf.float32))
+      sampling_ratio = 1
+      while not sampling_ratio < sr:
+        curr_edges = curr_graph.edges()
+        logits, _ = self.local_model(tf.convert_to_tensor(np.reshape(np.asarray(convert_to_state(curr_graph, list(curr_edges)[random.randint(0, len(edges))])), (-1, 13)), dtype=tf.float32))
         probs = tf.nn.softmax(logits)
 
         action = np.random.choice(self.action_size, p=probs.numpy()[0])
@@ -302,13 +350,16 @@ class Worker(threading.Thread):
   
         val1 = get_reward(curr_graph) 
         edges = curr_graph.edges(data = True)
-        edge = edges[random.randint(0,len(edges))]
+        edge = list(edges)[random.randint(0,len(edges))]
   
         new_graph, action = take_action(curr_graph, edge, action) 
         val2 = get_reward(new_graph) 
         reward = val2 - val1
+
+        new_edges = new_graph.edges(data = True)
+        sampling_ratio = len(new_edges) * 1.0 / len(edges)
   
-        if reward < 0.001:
+        if sampling_ratio < sr:
           reward = -1
         ep_reward += reward
   
@@ -358,7 +409,7 @@ class Worker(threading.Thread):
         # current_state = new_state
         curr_graph = new_graph
         total_step += 1
-  self.result_queue.put(None)
+    self.result_queue.put(None)
 
   def compute_loss(self,
                    done,
@@ -377,7 +428,7 @@ class Worker(threading.Thread):
       discounted_rewards.append(reward_sum)
     discounted_rewards.reverse()
 
-    logits, values = self.local_model(tf.convert_to_tensor(np.vstack(memory.states), dtype=tf.float32))
+    logits, values = self.local_model(tf.convert_to_tensor(np.reshape(np.vstack(memory.states), (-1, 13)), dtype=tf.float32))
 
     # Get our advantages
     advantage = tf.convert_to_tensor(np.array(discounted_rewards)[:, None],dtype=tf.float32) - values
@@ -398,41 +449,8 @@ class Worker(threading.Thread):
 if __name__ == '__main__':
   print(args)
   master = MasterAgent()
+
   if args.train:
     master.train()
   else:
     master.play()
-
-def getTrianglesCount(G):
-  triangles = nx.triangles(G).values()
-  res = 0
-
-  for t in triangles:
-   res+=t
-
-  return int(res/3);
-
-def get_reward(newG):
-  t2 = getTrianglesCount(newG)
-
-  # if diff is more discourage it
-  diff = orgValue - t2 + 0.0001
-
-  reward = orgValue/diff
-  return reward
-
-def take_action(graph, edge, action):
-  if action == 0:
-    return graph.remove_edge(edge[0], edge[1]), 0
- 
-  else:
-    return graph, 1
- 
-def convert_to_state(graph, edgevec):
-  graph_vec = []
-  graph_vec.append(nx.number_of_nodes(graph))
-  graph_vec.append(nx.density(graph))
-  graph_vec.append(nx.number_of_edges(graph))
-  
-  for i in range(2, len(edgevec)):
-    graph_vec.append(edgevec[i])
