@@ -1,4 +1,5 @@
 import os
+import time
 import networkx as nx
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
 import copy
@@ -16,7 +17,9 @@ from tensorflow.python import keras
 from tensorflow.python.keras import layers
 import random
 tf.enable_eager_execution()
+from multiprocessing.pool import ThreadPool as Pool
 
+pool_size = 10
 parser = argparse.ArgumentParser(description='Run A3C algorithm on the game '
                                              'Cartpole.')
 parser.add_argument('--algorithm', default='a3c', type=str,
@@ -38,7 +41,7 @@ args = parser.parse_args()
 Graph=nx.read_edgelist('/home/krishraj95/Big_Data_Project/CS744-Approximate-Graph-Analytics/Featurization/final_features/graph_119.embeddings', nodetype=int, data=(('f1',float),('f2',float),('f3',float),('f4',float),('f5',float),('f6',float),('f7',float),('f8',float),('f9',float),('f10',float)))
 G = copy.deepcopy(Graph)
 E = len(G.edges(data=True))
-sr = 0.4
+sr = 0.7
 
 def getTrianglesCount(G):
   triangles = nx.triangles(G).values()
@@ -54,17 +57,20 @@ def get_reward(newG):
   t2 = getTrianglesCount(newG)
 
   # if diff is more discourage it
-  diff = orgValue - t2 + 0.0001
-
-  reward = orgValue/diff
+  diff = orgValue - t2
+  # return diff
+  
+  reward = diff * 1.0/orgValue
+  # return 1
+  # return random.random()
   return reward
-
 def take_action(graph, edge, action):
-  if action == 0:
-    return graph.remove_edge(edge[0], edge[1]), 0
+  if action == 1:
+    graph.remove_edge(edge[0], edge[1])
+    return graph, 1
 
   else:
-    return graph, 1
+    return graph, 0
 
 def convert_to_state(graph, edgevec):
   graph_vec = []
@@ -85,7 +91,7 @@ class ActorCriticModel(keras.Model):
     self.state_size = state_size
     self.action_size = action_size
     self.dense1 = layers.Dense(50, activation='relu')
-    self.policy_logits = layers.Dense(1)
+    self.policy_logits = layers.Dense(2)
     self.dense2 = layers.Dense(50, activation='relu')
     self.values = layers.Dense(1)
 
@@ -146,7 +152,7 @@ class RandomAgent:
   def run(self):
     reward_avg = 0
     for episode in range(self.max_episodes):
-      done = False
+      # done = False
       curr_graph = G 
       # self.env.reset()
       reward_sum = 0.0
@@ -157,9 +163,9 @@ class RandomAgent:
         # _, reward, done, _ = self.env.step(self.env.action_space.sample())
         val1 = get_reward(curr_graph) 
         edges = curr_graph.edges(data = True)
-        edge = list(edges)[random.randint(0,len(edges))]
+        edge = list(edges)[random.randint(0,len(edges)-1)]
   
-        new_graph, action_taken = take_action(curr_graph, edge, random.randint(0,2)) 
+        new_graph, action_taken = take_action(copy.deepcopy(curr_graph), edge, random.randint(0,1)) 
         val2 = get_reward(new_graph) 
         reward = val2 - val1
  
@@ -168,7 +174,8 @@ class RandomAgent:
         curr_graph = new_graph
         new_edges = new_graph.edges(data = True)
         sampling_ratio = len(new_edges) * 1.0 / len(edges)
-  
+        # print(sampling_ratio)
+     
       # Record statistics
       self.global_moving_average_reward = record(episode,
                                                  reward_sum,
@@ -187,31 +194,40 @@ class MasterAgent():
     # self.game_name = 'CartPole-v0'
     save_dir = args.save_dir
     self.save_dir = save_dir
+    flag = False
     if not os.path.exists(save_dir):
       os.makedirs(save_dir)
 
+    else:
+      flag = True
     # env = gym.make(self.game_name)
     # self.state_size = env.observation_space.shape[0]
     self.state_size = pow(2, E) - 2
     # self.action_size = env.action_space.n
-    self.action_size = 1
-    self.opt = tf.train.AdamOptimizer(args.lr, use_locking=True)
+    self.action_size = 2
+    self.opt = tf.train.AdamOptimizer(float(args.lr), use_locking=True)
     print(self.state_size, self.action_size)
 
     self.global_model = ActorCriticModel(self.state_size, self.action_size)  # global network
     edges = G.edges(data=True)
-    print(list(edges)[random.randint(0, len(edges))])
+    
+    if flag:
+      print("Loading from saved file")
+      model_path = os.path.join(self.save_dir, 'model.h5') 
+      self.global_model.load_weights(model_path)
 
-    self.global_model(tf.convert_to_tensor(np.reshape(np.asarray(convert_to_state(G, list(edges)[random.randint(0, len(edges))])), (-1, 13)), dtype=tf.float32))
+    self.global_model(tf.convert_to_tensor(np.reshape(np.asarray(convert_to_state(G, list(edges)[random.randint(0, len(edges)-1)])), (-1, 13)), dtype=tf.float32))
 
   def train(self):
     if args.algorithm == 'random':
       # random_agent = RandomAgent(self.game_name, args.max_eps)
+      random_agent = RandomAgent(args.max_eps)
       random_agent.run()
       return
 
     res_queue = Queue()
 
+    # print(multiprocessing.cpu_count())
     workers = [Worker(self.state_size,
                       self.action_size,
                       self.global_model,
@@ -248,7 +264,7 @@ class MasterAgent():
     model_path = os.path.join(self.save_dir, 'model.h5')
     print('Loading model from: {}'.format(model_path))
     model.load_weights(model_path)
-    done = False
+    # done = False
     step_counter = 0
     reward_sum = 0
 
@@ -257,16 +273,16 @@ class MasterAgent():
       while not sampling_ratio < sr:
         # env.render(mode='rgb_array')
         curr_edges = curr_graph.edges(data = True)
-        policy, value = model(tf.convert_to_tensor(np.reshape(np.asarray(convert_to_state(curr_graph, list(curr_edges)[random.randint(0, len(curr_edges))])), (-1, 13)), dtype=tf.float32))
+        policy, value = model(tf.convert_to_tensor(np.reshape(np.asarray(convert_to_state(curr_graph, list(curr_edges)[random.randint(0, len(curr_edges)-1)])), (-1, 13)), dtype=tf.float32))
         policy = tf.nn.softmax(policy)
         action = np.argmax(policy)
         # state, reward, done, _ = env.step(action)
   
         val1 = get_reward(curr_graph) 
         edges = curr_graph.edges(data = True)
-        edge = list(edges)[random.randint(0,len(edges))]
+        edge = list(edges)[random.randint(0,len(edges)-1)]
  
-        new_graph, action = take_action(curr_graph, edge, action) 
+        new_graph, action = take_action(copy.deepcopy(curr_graph), edge, action) 
         val2 = get_reward(new_graph) 
         reward = val2 - val1
   
@@ -274,9 +290,11 @@ class MasterAgent():
         curr_graph = new_graph
         new_edges = new_graph.edges(data = True)
         sampling_ratio = len(new_edges) * 1.0 / len(edges)
-  
-        print("{}. Reward: {}, action: {}".format(step_counter, reward_sum, action))
+ 
+        # print("Considering edge {} and sampling ratio of {}".format(edge, sampling_ratio))
+        # print("{}. Reward: {}, action: {}".format(step_counter, reward_sum, action))
         step_counter += 1
+      print(curr_graph.edges())
     except KeyboardInterrupt:
       print("Received Keyboard Interrupt. Shutting down.")
 
@@ -340,46 +358,52 @@ class Worker(threading.Thread):
       self.ep_loss = 0
 
       time_count = 0
-      done = False
+      # done = False
       sampling_ratio = 1
       while not sampling_ratio < sr:
         curr_edges = curr_graph.edges(data=True)
-        logits, _ = self.local_model(tf.convert_to_tensor(np.reshape(np.asarray(convert_to_state(curr_graph, list(curr_edges)[random.randint(0, len(curr_edges))])), (-1, 13)), dtype=tf.float32))
+        logits, _ = self.local_model(tf.convert_to_tensor(np.reshape(np.asarray(convert_to_state(curr_graph, list(curr_edges)[random.randint(0, len(curr_edges)-1)])), (-1, 13)), dtype=tf.float32))
         probs = tf.nn.softmax(logits)
-
+        # sess = tf.Session()
+        # print("Probabilities")
+        # print(probs) 
+        # print(type(probs.eval(session=sess)))
         action = np.random.choice(self.action_size, p=probs.numpy()[0])
+        
         # new_state, reward, done, _ = self.env.step(action)
-  
         val1 = get_reward(curr_graph) 
         edges = curr_graph.edges(data = True)
-        edge = list(edges)[random.randint(0,len(edges))]
+        edge = list(edges)[random.randint(0,len(edges)-1)]
   
-        new_graph, action = take_action(curr_graph, edge, action) 
+        new_graph, action = take_action(copy.deepcopy(curr_graph), edge, action)
         val2 = get_reward(new_graph) 
         reward = val2 - val1
 
         new_edges = new_graph.edges(data = True)
         sampling_ratio = len(new_edges) * 1.0 / len(edges)
-  
+        # print(str(self.worker_idx) + " has sampling ratio " + str(sampling_ratio) + " in " + str(Worker.global_episode))
+       
         if sampling_ratio < sr:
-          reward = -1
+          reward = 0
         ep_reward += reward
   
         curr_state = convert_to_state(curr_graph, edge)
         mem.store(curr_state, action, reward)
 
         new_state = convert_to_state(new_graph, edge)
-        if time_count == args.update_freq or done:
+        if time_count == args.update_freq or sampling_ratio < sr:
           # Calculate gradient wrt to local model. We do so by tracking the
           # variables involved in computing the loss by using tf.GradientTape
           with tf.GradientTape() as tape:
-            total_loss = self.compute_loss(done,
+            total_loss = self.compute_loss(sampling_ratio < sr,
                                            new_state,
                                            mem,
-                                           args.gamma)
+                                           float(args.gamma))
           self.ep_loss += total_loss
           # Calculate local gradients
           grads = tape.gradient(total_loss, self.local_model.trainable_weights)
+           
+          # print(grads)
           # Push local gradients to global model
           self.opt.apply_gradients(zip(grads,
                                        self.global_model.trainable_weights))
@@ -389,24 +413,25 @@ class Worker(threading.Thread):
           mem.clear()
           time_count = 0
 
-          if done:  # done and print information
+          if sampling_ratio < sr:  # done and print information
             Worker.global_moving_average_reward = \
               record(Worker.global_episode, ep_reward, self.worker_idx,
                      Worker.global_moving_average_reward, self.result_queue,
                      self.ep_loss, ep_steps)
             # We must use a lock to save our model and to print to prevent data races.
-            if ep_reward > Worker.best_score:
-              with Worker.save_lock:
-                print("Saving best model to {}, "
+            # if ep_reward >= Worker.best_score:
+            with Worker.save_lock:
+              print("Saving best model to {}, "
                       "episode score: {}".format(self.save_dir, ep_reward))
-                self.global_model.save_weights(
+              self.global_model.save_weights(
                     os.path.join(self.save_dir,
-                                 'model_{}.h5'.format(self.game_name))
+                                 'model.h5')
                 )
-                Worker.best_score = ep_reward
+              Worker.best_score = ep_reward
             Worker.global_episode += 1
         ep_steps += 1
 
+        # print("Episode steps " + str(ep_steps))
         time_count += 1
         # current_state = new_state
         curr_graph = new_graph
@@ -418,14 +443,27 @@ class Worker(threading.Thread):
                    new_state,
                    memory,
                    gamma=0.99):
+    # print("New state")
+    # print(new_state)
     if done:
-      reward_sum = 0.  # terminal
+      reward_sum = 0.0  # terminal
     else:
-      reward_sum = self.local_model(tf.convert_to_tensor(new_state[None, :], dtype=tf.float32))[-1].numpy()[0]
+      reward_sum_arr = self.local_model(tf.convert_to_tensor(np.reshape(np.asarray(new_state), (-1,13)), dtype=tf.float32))[-1].numpy()[0].tolist()
+      reward_sum = reward_sum_arr[0]
 
+    # print(reward_sum)
     # Get discounted rewards
     discounted_rewards = []
+    # print("Rewards")
     for reward in memory.rewards[::-1]:  # reverse buffer r
+      # print("1")
+      # import pdb
+      # pdb.set_trace()
+      # print(reward)
+      # print("2")
+      # print(reward_sum)
+      # print("3")
+      # print(gamma)
       reward_sum = reward + gamma * reward_sum
       discounted_rewards.append(reward_sum)
     discounted_rewards.reverse()
@@ -449,10 +487,17 @@ class Worker(threading.Thread):
 
 
 if __name__ == '__main__':
-  print(args)
+  g = 119
   master = MasterAgent()
-
   if args.train:
+    # global G
+    # global E
+
+    # Graph=nx.read_edgelist('/home/krishraj95/Big_Data_Project/CS744-Approximate-Graph-Analytics/Featurization/final_features/graph_' + str(g) + '.embeddings', nodetype=int, data=(('f1',float),('f2',float),('f3',float),('f4',float),('f5',float),('f6',float),('f7',float),('f8',float),('f9',float),('f10',float)))
+
+    # G = copy.deepcopy(Graph)
+    # E = len(G.edges(data=True))
     master.train()
+
   else:
     master.play()
