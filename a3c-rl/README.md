@@ -1,4 +1,4 @@
-To run the random agent execute the following:
+To run the random agent execute the following:\
 python3 trial_a3c.py --algorithm random
 
 To run the A3C algorithm execute the following:
