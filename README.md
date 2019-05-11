@@ -1,4 +1,7 @@
 # GROUP2 - CS744 - APPROXIMATE GRAPH ANALYTICS USING REINFORCEMENT LEARNING
+## Architecture
+
+![flyer](images/arch.png)
 
 We perform approximate graph analytics using reinforcement learning that takes as input a graph and generates a sampled graph that produces almost the same results on the graph-processing algorithm as the the original graph. The reinforcement learner takes an input graph and removes one edge at a time until we get a sampled graph. We have implemented two reinforcement learners:
 1. A3C algorithm
